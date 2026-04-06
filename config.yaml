@@ -1,0 +1,11 @@
+server:
+  port: "9090"
+
+routes:
+  - path: /api
+    upstream: http://localhost:8080
+    middlewares: [logging, ratelimit, security]
+
+  - path: /static
+    upstream: http://localhost:8081
+    middlewares: [logging, cache, security]

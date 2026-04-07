@@ -1,6 +1,8 @@
 package proxy
 
 import (
+	"fmt"
+	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -18,17 +20,19 @@ func init() {
 	registry["logging"] = middleware.Logging()
 	registry["security"] = middleware.SecurityHeaders()
 	registry["ratelimit"] = middleware.RateLimit(60, time.Minute)
-	registry["cache"] = middleware.Cache(5 * time.Minute)
+	registry["cache"] = middleware.Cache(5*time.Minute, 1000)
+	registry["cors"] = middleware.CORS("*")
 }
 
 // BuildMux creates an http.ServeMux from the config routes.
-func BuildMux(cfg *config.Config) *http.ServeMux {
+// Returns an error if any route has an invalid upstream URL.
+func BuildMux(cfg *config.Config) (*http.ServeMux, error) {
 	mux := http.NewServeMux()
 
 	for _, route := range cfg.Routes {
 		upstream, err := url.Parse(route.Upstream)
 		if err != nil {
-			panic("invalid upstream URL: " + route.Upstream)
+			return nil, fmt.Errorf("invalid upstream URL %q for path %q: %w", route.Upstream, route.Path, err)
 		}
 
 		reverseProxy := httputil.NewSingleHostReverseProxy(upstream)
@@ -36,9 +40,12 @@ func BuildMux(cfg *config.Config) *http.ServeMux {
 		// Resolve middleware chain
 		var mws []middleware.Middleware
 		for _, name := range route.Middlewares {
-			if mw, ok := registry[strings.TrimSpace(name)]; ok {
-				mws = append(mws, mw)
+			mw, ok := registry[strings.TrimSpace(name)]
+			if !ok {
+				log.Printf("warning: unknown middleware %q in route %q, skipping", name, route.Path)
+				continue
 			}
+			mws = append(mws, mw)
 		}
 
 		handler := middleware.Chain(reverseProxy, mws...)
@@ -52,5 +59,5 @@ func BuildMux(cfg *config.Config) *http.ServeMux {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	return mux
+	return mux, nil
 }

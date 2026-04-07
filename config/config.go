@@ -1,6 +1,8 @@
 package config
 
 import (
+	"fmt"
+	"net/url"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -36,5 +38,30 @@ func Load(path string) (*Config, error) {
 		cfg.Server.Port = "8080"
 	}
 
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
+}
+
+// Validate checks that the configuration is valid.
+func (c *Config) Validate() error {
+	if len(c.Routes) == 0 {
+		return fmt.Errorf("config: at least one route is required")
+	}
+
+	for i, route := range c.Routes {
+		if route.Path == "" {
+			return fmt.Errorf("config: route[%d] missing path", i)
+		}
+		if route.Upstream == "" {
+			return fmt.Errorf("config: route[%d] missing upstream", i)
+		}
+		if _, err := url.Parse(route.Upstream); err != nil {
+			return fmt.Errorf("config: route[%d] invalid upstream URL %q: %w", i, route.Upstream, err)
+		}
+	}
+
+	return nil
 }

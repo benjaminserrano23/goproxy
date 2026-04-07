@@ -12,6 +12,7 @@ type cacheEntry struct {
 	header     http.Header
 	status     int
 	expiration time.Time
+	insertedAt time.Time
 }
 
 type cacheWriter struct {
@@ -31,13 +32,27 @@ func (cw *cacheWriter) Write(b []byte) (int, error) {
 }
 
 // Cache returns a middleware that caches GET responses for the given TTL.
-func Cache(ttl time.Duration) Middleware {
+// maxEntries limits the cache size; when full, the oldest entry is evicted.
+func Cache(ttl time.Duration, maxEntries int) Middleware {
 	var mu sync.RWMutex
 	entries := make(map[string]*cacheEntry)
 
+	evictOldest := func() {
+		var oldestKey string
+		var oldestTime time.Time
+		for k, v := range entries {
+			if oldestKey == "" || v.insertedAt.Before(oldestTime) {
+				oldestKey = k
+				oldestTime = v.insertedAt
+			}
+		}
+		if oldestKey != "" {
+			delete(entries, oldestKey)
+		}
+	}
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Only cache GET requests
 			if r.Method != http.MethodGet {
 				next.ServeHTTP(w, r)
 				return
@@ -45,13 +60,11 @@ func Cache(ttl time.Duration) Middleware {
 
 			key := r.URL.String()
 
-			// Check cache
 			mu.RLock()
 			entry, exists := entries[key]
 			mu.RUnlock()
 
 			if exists && time.Now().Before(entry.expiration) {
-				// Serve from cache
 				for k, v := range entry.header {
 					w.Header()[k] = v
 				}
@@ -61,21 +74,31 @@ func Cache(ttl time.Duration) Middleware {
 				return
 			}
 
-			// Cache miss — proxy and capture
 			buf := &bytes.Buffer{}
 			cw := &cacheWriter{ResponseWriter: w, buf: buf, status: http.StatusOK}
 			w.Header().Set("X-Cache", "MISS")
 
 			next.ServeHTTP(cw, r)
 
-			// Only cache successful responses
 			if cw.status >= 200 && cw.status < 300 {
+				now := time.Now()
 				mu.Lock()
+				// Evict expired entries first
+				for k, v := range entries {
+					if now.After(v.expiration) {
+						delete(entries, k)
+					}
+				}
+				// Evict oldest if still at capacity
+				if len(entries) >= maxEntries {
+					evictOldest()
+				}
 				entries[key] = &cacheEntry{
 					body:       buf.Bytes(),
 					header:     cw.Header().Clone(),
 					status:     cw.status,
-					expiration: time.Now().Add(ttl),
+					expiration: now.Add(ttl),
+					insertedAt: now,
 				}
 				mu.Unlock()
 			}

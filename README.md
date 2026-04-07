@@ -1,5 +1,7 @@
 # GoProxy
 
+[![CI](https://github.com/benjaminserrano23/goproxy/actions/workflows/ci.yml/badge.svg)](https://github.com/benjaminserrano23/goproxy/actions/workflows/ci.yml)
+
 Lightweight reverse proxy in Go with a configurable YAML-based middleware pipeline.
 
 ## Features
@@ -10,7 +12,10 @@ Lightweight reverse proxy in Go with a configurable YAML-based middleware pipeli
   - **Logging** — structured JSON request/response logs
   - **Rate Limiting** — token bucket per remote address
   - **Security Headers** — HSTS, X-Frame-Options, X-Content-Type-Options, etc.
-  - **Cache** — in-memory GET response cache with configurable TTL
+  - **Cache** — bounded in-memory GET response cache with TTL and eviction
+  - **CORS** — configurable cross-origin resource sharing
+- **Graceful shutdown** — handles SIGINT/SIGTERM with in-flight request draining
+- **Config validation** — clear error messages for invalid routes
 - **Standard library** — built on `net/http` and `httputil.ReverseProxy`
 
 ## Configuration

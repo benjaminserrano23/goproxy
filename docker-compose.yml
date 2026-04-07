@@ -16,11 +16,10 @@ services:
       STORE_TYPE: redis
       REDIS_URL: redis:6379
       PORT: "8080"
-    ports:
-      - "8080:8080"
     depends_on:
       redis:
         condition: service_healthy
+    # Port 8080 only exposed within Docker network, not to host
 
   goproxy:
     build: .

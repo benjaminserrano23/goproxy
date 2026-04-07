@@ -70,7 +70,21 @@ func TestSecurityHeaders(t *testing.T) {
 }
 
 func TestRateLimit_AllowsThenDenies(t *testing.T) {
-	handler := middleware.Chain(okHandler(), middleware.RateLimit(3, time.Minute))
+	// Mock ratelimiter service: allows first 3 requests, denies the rest
+	calls := 0
+	mockRL := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls > 3 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			w.Write([]byte(`{"allowed":false,"remaining":0}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"allowed":true,"remaining":1}`))
+	}))
+	defer mockRL.Close()
+
+	handler := middleware.Chain(okHandler(), middleware.RateLimit(mockRL.URL, 3, time.Minute))
 
 	for i := 0; i < 3; i++ {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -88,6 +102,19 @@ func TestRateLimit_AllowsThenDenies(t *testing.T) {
 	handler.ServeHTTP(w, req)
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected 429, got %d", w.Code)
+	}
+}
+
+func TestRateLimit_FailOpen(t *testing.T) {
+	// Point to a URL that doesn't exist — should fail open
+	handler := middleware.Chain(okHandler(), middleware.RateLimit("http://localhost:1", 10, time.Minute))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("should fail open with 200, got %d", w.Code)
 	}
 }
 

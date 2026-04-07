@@ -1,52 +1,47 @@
 package middleware
 
 import (
+	"fmt"
+	"log"
 	"net/http"
-	"sync"
+	"strings"
 	"time"
 )
 
-type rateLimitEntry struct {
-	tokens     float64
-	lastRefill time.Time
-}
-
-// RateLimit returns a token bucket rate limiting middleware.
-// limit: max requests, window: time period.
-func RateLimit(limit int, window time.Duration) Middleware {
-	var mu sync.Mutex
-	buckets := make(map[string]*rateLimitEntry)
-	refillRate := float64(limit) / window.Seconds()
+// RateLimit returns a middleware that delegates rate limiting to an external
+// ratelimiter-go service via HTTP. Fails open: if the service is unreachable,
+// the request is allowed (with a warning log).
+func RateLimit(ratelimiterURL string, limit int, window time.Duration) Middleware {
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	windowStr := window.String()
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			key := r.RemoteAddr
 
-			mu.Lock()
-			now := time.Now()
-			entry, exists := buckets[key]
-			if !exists {
-				buckets[key] = &rateLimitEntry{tokens: float64(limit - 1), lastRefill: now}
-				mu.Unlock()
+			body := fmt.Sprintf(
+				`{"key":%q,"limit":%d,"window":%q,"algorithm":"token_bucket"}`,
+				key, limit, windowStr,
+			)
+
+			resp, err := client.Post(
+				ratelimiterURL+"/check",
+				"application/json",
+				strings.NewReader(body),
+			)
+			if err != nil {
+				// Fail open: allow request if ratelimiter is down
+				log.Printf("warning: ratelimiter unreachable: %v", err)
 				next.ServeHTTP(w, r)
 				return
 			}
+			defer resp.Body.Close()
 
-			elapsed := now.Sub(entry.lastRefill)
-			entry.tokens += elapsed.Seconds() * refillRate
-			if entry.tokens > float64(limit) {
-				entry.tokens = float64(limit)
-			}
-			entry.lastRefill = now
-
-			if entry.tokens < 1 {
-				mu.Unlock()
+			if resp.StatusCode == http.StatusTooManyRequests {
 				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 				return
 			}
 
-			entry.tokens--
-			mu.Unlock()
 			next.ServeHTTP(w, r)
 		})
 	}

@@ -9,8 +9,15 @@ import (
 )
 
 type Config struct {
-	Server ServerConfig `yaml:"server"`
-	Routes []Route      `yaml:"routes"`
+	Server      ServerConfig      `yaml:"server"`
+	Routes      []Route           `yaml:"routes"`
+	RateLimiter RateLimiterConfig `yaml:"ratelimiter"`
+}
+
+type RateLimiterConfig struct {
+	URL    string `yaml:"url"`
+	Limit  int    `yaml:"limit"`
+	Window string `yaml:"window"`
 }
 
 type ServerConfig struct {
@@ -36,6 +43,25 @@ func Load(path string) (*Config, error) {
 
 	if cfg.Server.Port == "" {
 		cfg.Server.Port = "8080"
+	}
+
+	// Defaults for ratelimiter
+	if cfg.RateLimiter.URL == "" {
+		cfg.RateLimiter.URL = "http://localhost:8080"
+	}
+	if cfg.RateLimiter.Limit == 0 {
+		cfg.RateLimiter.Limit = 60
+	}
+	if cfg.RateLimiter.Window == "" {
+		cfg.RateLimiter.Window = "1m"
+	}
+
+	// Environment variable overrides
+	if u := os.Getenv("RATELIMITER_URL"); u != "" {
+		cfg.RateLimiter.URL = u
+	}
+	if p := os.Getenv("PORT"); p != "" {
+		cfg.Server.Port = p
 	}
 
 	if err := cfg.Validate(); err != nil {

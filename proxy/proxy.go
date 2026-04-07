@@ -13,20 +13,24 @@ import (
 	"github.com/benjaminserrano23/goproxy/middleware"
 )
 
-// Registry maps middleware names to their constructors.
-var registry = map[string]middleware.Middleware{}
-
-func init() {
-	registry["logging"] = middleware.Logging()
-	registry["security"] = middleware.SecurityHeaders()
-	registry["ratelimit"] = middleware.RateLimit(60, time.Minute)
-	registry["cache"] = middleware.Cache(5*time.Minute, 1000)
-	registry["cors"] = middleware.CORS("*")
-}
-
 // BuildMux creates an http.ServeMux from the config routes.
 // Returns an error if any route has an invalid upstream URL.
 func BuildMux(cfg *config.Config) (*http.ServeMux, error) {
+	// Parse ratelimiter window
+	window, err := time.ParseDuration(cfg.RateLimiter.Window)
+	if err != nil {
+		window = time.Minute
+	}
+
+	// Build middleware registry with config values
+	registry := map[string]middleware.Middleware{
+		"logging":   middleware.Logging(),
+		"security":  middleware.SecurityHeaders(),
+		"ratelimit": middleware.RateLimit(cfg.RateLimiter.URL, cfg.RateLimiter.Limit, window),
+		"cache":     middleware.Cache(5*time.Minute, 1000),
+		"cors":      middleware.CORS("*"),
+	}
+
 	mux := http.NewServeMux()
 
 	for _, route := range cfg.Routes {

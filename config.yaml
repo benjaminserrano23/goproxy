@@ -1,6 +1,11 @@
 server:
   port: "9090"
 
+ratelimiter:
+  url: http://localhost:8080
+  limit: 60
+  window: "1m"
+
 routes:
   - path: /api
     upstream: http://localhost:8080
